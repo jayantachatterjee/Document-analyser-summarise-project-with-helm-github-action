@@ -1,0 +1,40 @@
+# Global environment configurations
+global:
+  environment: production
+
+# Variables for frontend-deployment.yaml
+frontend:
+  replicaCount: 2
+  image:
+    repository: "123456789012.dkr.ecr.us-east-1.amazonaws.com/ai-frontend" # Change to your ECR path
+    tag: "latest" # Your pipeline will override this with the Git SHA at runtime
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 3000
+
+# Variables for worker-deployment.yaml
+worker:
+  replicaCount: 1
+  image:
+    repository: "123456789012.dkr.ecr.us-east-1.amazonaws.com/ai-worker" # Change to your ECR path
+    tag: "latest" # Your pipeline will override this with the Git SHA at runtime
+    pullPolicy: IfNotPresent
+
+# Parameters passed directly into the Bitnami PostgreSQL sub-chart dependency
+postgresql:
+  auth:
+    username: app_user
+    password: app_secure_password
+    database: ai_portfolio_db
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Parameters passed directly into the Bitnami Redis sub-chart dependency
+redis:
+  auth:
+    enabled: false # Simple authentication baseline for portfolio presentation
+  architecture: standalone

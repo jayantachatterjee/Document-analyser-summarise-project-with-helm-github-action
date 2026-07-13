@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: app_secure_password
+      POSTGRES_DB: ai_portfolio_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  frontend-api:
+    build: ./frontend-api
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://app_user:app_secure_password@postgres:5432/ai_portfolio_db
+    depends_on:
+      - postgres
+      - redis
+
+  ai-worker:
+    build: ./ai-worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://app_user:app_secure_password@postgres:5432/ai_portfolio_db
+    depends_on:
+      - redis
+      - postgres
+
+volumes:
+  pgdata:

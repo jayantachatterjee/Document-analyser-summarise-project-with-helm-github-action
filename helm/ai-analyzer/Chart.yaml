@@ -1,0 +1,14 @@
+apiVersion: v2
+name: ai-analyzer
+description: A production-grade multi-tier AI document summary application chart
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: postgresql
+    version: "^18.0.0"  # Allows any stable 18.x version
+    repository: https://charts.bitnami.com/bitnami
+  - name: redis
+    version: "^27.0.0"  # Allows any stable 27.x version
+    repository: https://charts.bitnami.com/bitnami
