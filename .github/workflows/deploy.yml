@@ -24,36 +24,39 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    # Clean the ngrok URL (e.g., 'https://xxxx.ngrok-free.app' -> 'xxxx.ngrok-free.app')
+    # Clean the ngrok URL (e.g., 'https://xxxx.ngrok-free.dev' -> 'single-rule-stylishly.ngrok-free.dev')
     - name: Extract Clean Floci Host
       id: floci-host
       run: |
         HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
         echo "host=$HOST" >> $GITHUB_OUTPUT
 
-    # Build and Push Frontend API Image directly via ngrok
+    # Force login with dummy credentials so Floci routes requests to ECR instead of S3
+    - name: Log in to Local Floci ECR
+      run: |
+        docker login ${{ steps.floci-host.outputs.host }} -u test -p test
+
+    # Build and Push Frontend API Image without OCI attestations
     - name: Build and Push Frontend API Image
       uses: docker/build-push-action@v5
       with:
         context: ./frontend-api
         push: true
+        provenance: false
         tags: |
           ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
           ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
-    # Build and Push background Worker Image directly via ngrok
+    # Build and Push background Worker Image without OCI attestations
     - name: Build and Push AI Worker Image
       uses: docker/build-push-action@v5
       with:
         context: ./ai-worker
         push: true
+        provenance: false
         tags: |
           ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_WORKER }}:${{ github.sha }}
           ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_WORKER }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
   deploy-to-eks:
     name: Deploy to Local Floci EKS via Helm
