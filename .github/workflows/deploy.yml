@@ -1,4 +1,4 @@
-name: CI/CD Pipeline to Local Floci EKS via ngrok
+name: CI/CD Pipeline to Local Floci ECR, EKS via ngrok
 
 on:
   push:
