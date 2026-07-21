@@ -60,6 +60,12 @@ jobs:
           --name ${{ env.EKS_CLUSTER_NAME }} \
           --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
 
+    - name: Rewrite Kubeconfig Endpoint to ngrok Tunnel
+      run: |
+        NGROK_HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
+        kubectl config set-cluster arn:aws:eks:${{ env.AWS_REGION }}:000000000000:cluster/${{ env.EKS_CLUSTER_NAME }} --server=https://$NGROK_HOST
+        kubectl config set-cluster arn:aws:eks:${{ env.AWS_REGION }}:000000000000:cluster/${{ env.EKS_CLUSTER_NAME }} --insecure-skip-tls-verify=true
+
     - name: Install Helm
       run: |
         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
