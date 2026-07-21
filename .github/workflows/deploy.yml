@@ -31,15 +31,7 @@ jobs:
         HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
         echo "host=$HOST" >> $GITHUB_OUTPUT
 
-    # Authenticate Docker against your local Floci ECR via ngrok
-    - name: Log in to Local Floci ECR
-      run: |
-        aws ecr get-login-password \
-          --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }} \
-          --region ${{ env.AWS_REGION }} | \
-        docker login --username AWS --password-stdin ${{ steps.floci-host.outputs.host }}
-
-    # Build and Push Frontend API Image
+    # Build and Push Frontend API Image directly via ngrok
     - name: Build and Push Frontend API Image
       uses: docker/build-push-action@v5
       with:
@@ -51,7 +43,7 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # Build and Push background Worker Image
+    # Build and Push background Worker Image directly via ngrok
     - name: Build and Push AI Worker Image
       uses: docker/build-push-action@v5
       with:
