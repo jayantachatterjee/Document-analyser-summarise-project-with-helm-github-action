@@ -52,6 +52,20 @@ jobs:
           ${{ env.ECR_REPOSITORY_WORKER }}:${{ github.sha }}
           ${{ env.ECR_REPOSITORY_WORKER }}:latest
 
+    # Ensure cluster is registered in Floci before attempting kubeconfig extraction
+    - name: Ensure Floci EKS Cluster Exists
+      run: |
+        aws eks describe-cluster \
+          --name ${{ env.EKS_CLUSTER_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }} || \
+        aws eks create-cluster \
+          --name ${{ env.EKS_CLUSTER_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --role-arn arn:aws:iam::000000000000:role/dummy-role \
+          --resources-vpc-config {} \
+          --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
+
     # Point runner's kubeconfig to your local Floci EKS cluster through ngrok
     - name: Update Kubeconfig for Floci EKS
       run: |
@@ -60,11 +74,12 @@ jobs:
           --name ${{ env.EKS_CLUSTER_NAME }} \
           --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
 
-    - name: Rewrite Kubeconfig Endpoint to ngrok Tunnel
+    # Configure credentials and skip TLS verification for the local ngrok tunnel
+    - name: Configure Kubectl Context
       run: |
-        NGROK_HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
-        kubectl config set-cluster arn:aws:eks:${{ env.AWS_REGION }}:000000000000:cluster/${{ env.EKS_CLUSTER_NAME }} --server=https://$NGROK_HOST
-        kubectl config set-cluster arn:aws:eks:${{ env.AWS_REGION }}:000000000000:cluster/${{ env.EKS_CLUSTER_NAME }} --insecure-skip-tls-verify=true
+        kubectl config set-credentials aws --token=dummy-token
+        kubectl config set-cluster arn:aws:eks:${{ env.AWS_REGION }}:000000000000:cluster/${{ env.EKS_CLUSTER_NAME }} \
+          --insecure-skip-tls-verify=true
 
     - name: Install Helm
       run: |
@@ -76,6 +91,7 @@ jobs:
         helm dependency update ./helm/ai-analyzer
         helm upgrade --install ai-analyzer ./helm/ai-analyzer \
           --namespace ai-apps --create-namespace \
+          --kube-insecure-skip-tls-verify \
           --set frontend.image.repository=${{ env.ECR_REPOSITORY_FRONTEND }} \
           --set frontend.image.tag=${{ github.sha }} \
           --set worker.image.repository=${{ env.ECR_REPOSITORY_WORKER }} \
