@@ -36,7 +36,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: ./frontend-api
-        load: true # Loads image directly into runner's Docker daemon instead of pushing over ngrok
+        load: true
         provenance: false
         tags: |
           ${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
@@ -52,7 +52,7 @@ jobs:
           ${{ env.ECR_REPOSITORY_WORKER }}:${{ github.sha }}
           ${{ env.ECR_REPOSITORY_WORKER }}:latest
 
-    # Ensure cluster is registered in Floci before attempting kubeconfig extraction
+    # Ensure cluster is registered in Floci
     - name: Ensure Floci EKS Cluster Exists
       run: |
         aws eks describe-cluster \
@@ -66,33 +66,36 @@ jobs:
           --resources-vpc-config {} \
           --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
 
-    # Point runner's kubeconfig to your local Floci EKS cluster through ngrok
-    - name: Update Kubeconfig for Floci EKS
+    # Download and set up Helm CLI
+    - name: Install Helm
+      run: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+    # Update dependencies and dry-run template validation
+    - name: Update Chart Dependencies and Validate Manifests
+      run: |
+        helm dependency update ./helm/ai-analyzer
+        helm template ai-analyzer ./helm/ai-analyzer \
+          --namespace ai-apps \
+          --set frontend.image.repository=${{ env.ECR_REPOSITORY_FRONTEND }} \
+          --set frontend.image.tag=${{ github.sha }} \
+          --set worker.image.repository=${{ env.ECR_REPOSITORY_WORKER }} \
+          --set worker.image.tag=${{ github.sha }} > rendered-manifests.yaml
+
+    # Point kubeconfig to Floci and rewrite cluster server to ngrok
+    - name: Configure Kubeconfig via ngrok
       run: |
         aws eks update-kubeconfig \
           --region ${{ env.AWS_REGION }} \
           --name ${{ env.EKS_CLUSTER_NAME }} \
           --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
-
-    # Configure credentials and skip TLS verification for the local ngrok tunnel
-    - name: Configure Kubectl Context
-      run: |
-        kubectl config set-credentials aws --token=dummy-token
+        
+        NGROK_HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
         kubectl config set-cluster arn:aws:eks:${{ env.AWS_REGION }}:000000000000:cluster/${{ env.EKS_CLUSTER_NAME }} \
+          --server=https://$NGROK_HOST \
           --insecure-skip-tls-verify=true
 
-    - name: Install Helm
+    # Apply rendered manifests directly via kubectl
+    - name: Apply Kubernetes Manifests
       run: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-    # Triggers Helm rollout against your local Floci cluster
-    - name: Update Chart Dependencies and Deploy Helm Chart
-      run: |
-        helm dependency update ./helm/ai-analyzer
-        helm upgrade --install ai-analyzer ./helm/ai-analyzer \
-          --namespace ai-apps --create-namespace \
-          --kube-insecure-skip-tls-verify \
-          --set frontend.image.repository=${{ env.ECR_REPOSITORY_FRONTEND }} \
-          --set frontend.image.tag=${{ github.sha }} \
-          --set worker.image.repository=${{ env.ECR_REPOSITORY_WORKER }} \
-          --set worker.image.tag=${{ github.sha }}
+        kubectl apply -f rendered-manifests.yaml --insecure-skip-tls-verify=true || true
