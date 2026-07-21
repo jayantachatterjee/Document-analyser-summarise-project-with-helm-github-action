@@ -1,4 +1,4 @@
-name: CI/CD Pipeline to Local Floci ECR, EKS via ngrok
+name: CI/CD Pipeline to Local Floci EKS via ngrok
 
 on:
   push:
@@ -9,6 +9,8 @@ env:
   ECR_REPOSITORY_FRONTEND: ai-frontend
   ECR_REPOSITORY_WORKER: ai-worker
   EKS_CLUSTER_NAME: ai-devops-cluster
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
 
 jobs:
   build-and-push:
@@ -18,14 +20,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-
-    # Uses dummy credentials matching your local Floci setup
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: test
-        aws-secret-access-key: test
-        aws-region: ${{ env.AWS_REGION }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -45,7 +39,7 @@ jobs:
           --region ${{ env.AWS_REGION }} | \
         docker login --username AWS --password-stdin ${{ steps.floci-host.outputs.host }}
 
-    # Build and Push Frontend API Image to local Floci registry
+    # Build and Push Frontend API Image
     - name: Build and Push Frontend API Image
       uses: docker/build-push-action@v5
       with:
@@ -57,7 +51,7 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # Build and Push background Worker Image to local Floci registry
+    # Build and Push background Worker Image
     - name: Build and Push AI Worker Image
       uses: docker/build-push-action@v5
       with:
@@ -78,13 +72,6 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: test
-        aws-secret-access-key: test
-        aws-region: ${{ env.AWS_REGION }}
-
     - name: Extract Clean Floci Host
       id: floci-host
       run: |
@@ -100,9 +87,8 @@ jobs:
           --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
 
     - name: Install Helm
-      uses: azure/setup-helm@v4
-      with:
-        version: 'v3.14.0'
+      run: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
     # Deploys Helm Chart to your local Floci EKS cluster
     - name: Update Chart Dependencies and Deploy Helm Chart
