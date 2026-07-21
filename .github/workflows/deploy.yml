@@ -1,65 +1,76 @@
-name: CI/CD Pipeline to AWS EKS
+name: CI/CD Pipeline to Local Floci EKS via ngrok
 
 on:
   push:
     branches: [ "main" ]
 
 env:
-  AWS_REGION: us-east-1                  # Match this to your target AWS region
+  AWS_REGION: us-east-1                  
   ECR_REPOSITORY_FRONTEND: ai-frontend
   ECR_REPOSITORY_WORKER: ai-worker
   EKS_CLUSTER_NAME: ai-devops-cluster
 
 jobs:
   build-and-push:
-    name: Build, Tag, and Push Images
+    name: Build, Tag, and Push Images to Floci ECR
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
 
+    # Uses dummy credentials matching your local Floci setup
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: test
+        aws-secret-access-key: test
         aws-region: ${{ env.AWS_REGION }}
-
-    - name: Log in to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    # Build and Push Frontend API Image using Git Commit SHA for unique tracking
-    # This prevents image collision and ensures deterministic, zero-downtime rollouts
+    # Clean the ngrok URL (e.g., 'https://xxxx.ngrok-free.app' -> 'xxxx.ngrok-free.app')
+    - name: Extract Clean Floci Host
+      id: floci-host
+      run: |
+        HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
+        echo "host=$HOST" >> $GITHUB_OUTPUT
+
+    # Authenticate Docker against your local Floci ECR via ngrok
+    - name: Log in to Local Floci ECR
+      run: |
+        aws ecr get-login-password \
+          --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }} \
+          --region ${{ env.AWS_REGION }} | \
+        docker login --username AWS --password-stdin ${{ steps.floci-host.outputs.host }}
+
+    # Build and Push Frontend API Image to local Floci registry
     - name: Build and Push Frontend API Image
       uses: docker/build-push-action@v5
       with:
         context: ./frontend-api
         push: true
         tags: |
-          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
-          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
+          ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
+          ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # Build and Push background Worker Image using Git Commit SHA
+    # Build and Push background Worker Image to local Floci registry
     - name: Build and Push AI Worker Image
       uses: docker/build-push-action@v5
       with:
         context: ./ai-worker
         push: true
         tags: |
-          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_WORKER }}:${{ github.sha }}
-          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_WORKER }}:latest
+          ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_WORKER }}:${{ github.sha }}
+          ${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_WORKER }}:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
   deploy-to-eks:
-    name: Deploy to Amazon EKS via Helm
+    name: Deploy to Local Floci EKS via Helm
     needs: build-and-push
     runs-on: ubuntu-latest
     
@@ -70,30 +81,36 @@ jobs:
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: test
+        aws-secret-access-key: test
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: Log in to Amazon ECR to grab registry URI
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Update Kubeconfig for EKS
+    - name: Extract Clean Floci Host
+      id: floci-host
       run: |
-        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+        HOST=$(echo "${{ secrets.LOCAL_AWS_ENDPOINT }}" | sed -e 's|^https://||' -e 's|^http://||')
+        echo "host=$HOST" >> $GITHUB_OUTPUT
+
+    # Point local kubeconfig to the Floci EKS endpoint
+    - name: Update Kubeconfig for Floci EKS
+      run: |
+        aws eks update-kubeconfig \
+          --region ${{ env.AWS_REGION }} \
+          --name ${{ env.EKS_CLUSTER_NAME }} \
+          --endpoint-url ${{ secrets.LOCAL_AWS_ENDPOINT }}
 
     - name: Install Helm
       uses: azure/setup-helm@v4
       with:
         version: 'v3.14.0'
 
-    # Automatically pulls downstream subcharts (Postgres/Redis) and upgrades application resources
+    # Deploys Helm Chart to your local Floci EKS cluster
     - name: Update Chart Dependencies and Deploy Helm Chart
       run: |
         helm dependency update ./helm/ai-analyzer
         helm upgrade --install ai-analyzer ./helm/ai-analyzer \
           --namespace ai-apps --create-namespace \
-          --set frontend.image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }} \
+          --set frontend.image.repository=${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_FRONTEND }} \
           --set frontend.image.tag=${{ github.sha }} \
-          --set worker.image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_WORKER }} \
+          --set worker.image.repository=${{ steps.floci-host.outputs.host }}/${{ env.ECR_REPOSITORY_WORKER }} \
           --set worker.image.tag=${{ github.sha }}
